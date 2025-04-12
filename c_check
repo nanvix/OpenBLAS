@@ -78,6 +78,7 @@ case "$data" in *OS_CYGWIN_NT*) os=CYGWIN_NT ;; esac
 case "$data" in *OS_INTERIX*) os=Interix ;; esac
 case "$data" in *OS_ANDROID*) os=Android ;; esac
 case "$data" in *OS_HAIKU*) os=Haiku ;; esac
+case "$data" in *OS_NANVIX*) os=Nanvix ;; esac
 
 case "$data" in
     *ARCH_X86_64*) architecture=x86_64 ;;

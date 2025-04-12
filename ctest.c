@@ -76,6 +76,10 @@ OS_DRAGONFLY
 OS_SUNOS
 #endif
 
+#if defined(__nanvix__)
+OS_NANVIX
+#endif
+
 #if defined(__APPLE__)
 OS_DARWIN
 #endif

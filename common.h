@@ -107,7 +107,7 @@ extern "C" {
 #endif
 #endif
 
-#if defined(OS_HAIKU) || defined(OS_QNX)
+#if defined(OS_HAIKU) || defined(OS_QNX) || defined(OS_NANVIX)
 #define NO_SYSV_IPC
 #endif
 

@@ -1721,8 +1721,8 @@ inline int atoi(const char *str) { return 0; }
 #include <sys/mman.h>
 #ifndef NO_SYSV_IPC
 #include <sys/shm.h>
-#endif
 #include <sys/ipc.h>
+#endif
 #endif
 
 #include <sys/types.h>

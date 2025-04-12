@@ -449,6 +449,10 @@ EXTRALIB	+= -lm
 #NO_EXPRECISION = 1
 endif
 
+ifeq ($(OSNAME), Nanvix)
+EXTRALIB	+= -lm
+endif
+
 ifeq ($(OSNAME), Android)
 EXTRALIB	+= -lm
 endif
