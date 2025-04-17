@@ -166,6 +166,7 @@ endif
 endif
 
 tests : shared
+ifneq ($(CROSS), 1)
 ifeq ($(NOFORTRAN), $(filter 0,$(NOFORTRAN)))
 	touch $(LIBNAME)
 ifndef NO_FBLAS
@@ -181,6 +182,7 @@ ifneq ($(ONLY_CBLAS), 1)
 endif
 ifeq ($(CPP_THREAD_SAFETY_TEST), 1)
 	$(MAKE) -C cpp_thread_test all
+endif
 endif
 endif
 
@@ -219,7 +221,7 @@ ifeq ($(DYNAMIC_ARCH), 1)
 	@echo DYNAMIC_ARCH=1 >> Makefile.conf_last
 ifeq ($(DYNAMIC_OLDER), 1)
 	@echo DYNAMIC_OLDER=1 >> Makefile.conf_last
-endif	
+endif
 endif
 	@echo TARGET=$(CORE) >> Makefile.conf_last
 ifdef USE_THREAD
