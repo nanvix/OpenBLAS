@@ -112,3 +112,4 @@ CMakeFiles/*
 **/__pycache__
 
 .z.cache
+cblas_test.elf
