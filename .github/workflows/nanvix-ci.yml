@@ -88,14 +88,6 @@ jobs:
           tar -xjf "$ARTIFACT_FILE" -C nanvix-artifacts/extracted
           NANVIX_HOME=$(find nanvix-artifacts/extracted -maxdepth 2 -type d -name "bin" -exec dirname {} \; | head -1)
           echo "NANVIX_HOME=$NANVIX_HOME" >> "$GITHUB_ENV"
-          # Find nanvixd executable for functional tests
-          NANVIXD=$(find nanvix-artifacts/extracted -name "nanvixd" -type f -executable | head -1)
-          if [[ -n "$NANVIXD" ]]; then
-            echo "NANVIXD=$NANVIXD" >> "$GITHUB_ENV"
-            echo "Found nanvixd at: $NANVIXD"
-          else
-            echo "::warning::nanvixd not found in release artifacts, functional tests will be skipped"
-          fi
 
       - name: Build
         run: |
@@ -111,13 +103,7 @@ jobs:
 
       - name: Run Functional Tests
         run: |
-          if [[ -n "${NANVIXD:-}" && -x "$NANVIXD" ]]; then
-            echo "Running CBLAS functional tests with nanvixd..."
-            make -f Makefile.nanvix CONFIG_NANVIX=y NANVIX_HOME="$NANVIX_HOME" NANVIX_TOOLCHAIN="/opt/nanvix" NANVIXD="$NANVIXD" test
-          else
-            echo "::warning::Skipping functional tests (nanvixd not available)"
-            echo "Static verification passed - library is correctly built"
-          fi
+          make -f Makefile.nanvix CONFIG_NANVIX=y NANVIX_HOME="$NANVIX_HOME" NANVIX_TOOLCHAIN="/opt/nanvix" test
 
       - name: Package Artifacts
         run: |

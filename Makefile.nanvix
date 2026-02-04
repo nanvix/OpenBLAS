@@ -181,20 +181,12 @@ else
 endif
 	@echo "		*** OpenBLAS symbol verification OK ***"
 
-# Test target: run functional tests using nanvixd
-# NANVIXD can be overridden, defaults to nanvixd in the Nanvix build directory
-NANVIXD ?= $(dir $(NANVIX_HOME))target/debug/nanvixd
-
+# Test target: run functional tests using nanvixd.elf
 test: $(CBLAS_TEST) verify
 	@echo ""
 	@echo "Running CBLAS functional tests on Nanvix..."
 	@echo "============================================"
-	@if [ -x "$(NANVIXD)" ]; then \
-		$(NANVIXD) -- $(abspath $(CBLAS_TEST)); \
-	else \
-		echo "WARNING: nanvixd not found at $(NANVIXD)"; \
-		echo "Skipping functional tests. Set NANVIXD=/path/to/nanvixd to run tests."; \
-	fi
+	cd "$(NANVIX_HOME)" && ./bin/nanvixd.elf -- $(abspath $(CBLAS_TEST))
 	@echo ""
 	@echo "		*** OpenBLAS CBLAS tests PASSED ***"
 
