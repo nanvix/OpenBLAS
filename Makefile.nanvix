@@ -4,10 +4,18 @@
 # Licensed under the MIT License.
 #
 # Usage:
-#   make -f Makefile.nanvix CONFIG_NANVIX=y NANVIX_HOME=/path/to/nanvix all
+#   make -f Makefile.nanvix CONFIG_NANVIX=y NANVIX_HOME=/path/to/sysroot all
 #
-# This Makefile provides Nanvix cross-compilation support similar to QuickJS, zlib,
-# SQLite and OpenSSL. It wraps the OpenBLAS build system with Nanvix cross-compilation settings.
+# Targets:
+#   all              Build static library
+#   test-smoke       Verify build artifacts exist and are valid (no runtime)
+#   test-integration Build and link CBLAS test executable against library
+#   test-functional  Run CBLAS tests on nanvixd.elf (requires KVM)
+#   test             Run all test levels
+#   package          Create portable release tarball in dist/
+#   verify-package   Verify package tarball contents
+#   install          Install library and headers to PREFIX
+#   clean            Remove build artifacts
 
 # Nanvix Docker image for cross-compilation (used as fallback if native toolchain not found)
 NANVIX_DOCKER_IMAGE ?= nanvix/toolchain:latest-minimal
@@ -48,10 +56,10 @@ ifdef CONFIG_NANVIX
     $(info [INFO] Using Docker image $(NANVIX_DOCKER_IMAGE) (explicitly requested))
   endif
 
-  EXE=.elf
+  EXE = .elf
+  SYSROOT_PATH := $(abspath $(NANVIX_HOME))
 
   ifdef CONFIG_NANVIX_DOCKER
-    # Docker-based cross-compilation
     DOCKER_TOOLCHAIN_PATH := /opt/nanvix
     DOCKER_SYSROOT_PATH := /mnt/sysroot
     DOCKER_WORKSPACE_PATH := /mnt/workspace
@@ -59,48 +67,59 @@ ifdef CONFIG_NANVIX
     DOCKER_GID := $(shell id -g)
     DOCKER_RUN := docker run --rm --user $(DOCKER_UID):$(DOCKER_GID) \
       -v $(CURDIR):$(DOCKER_WORKSPACE_PATH) \
-      -v $(abspath $(NANVIX_HOME)):$(DOCKER_SYSROOT_PATH):ro \
+      -v $(SYSROOT_PATH):$(DOCKER_SYSROOT_PATH):ro \
       -w $(DOCKER_WORKSPACE_PATH) \
       -e HOME=/tmp \
       $(NANVIX_DOCKER_IMAGE)
-
-    # Cross-compiler settings for Docker
+    DOCKER_KVM_GID := $(shell stat -c '%g' /dev/kvm 2>/dev/null || echo 0)
+    DOCKER_RUN_FUNCTIONAL := docker run --rm --device /dev/kvm \
+      --user $(DOCKER_UID):$(DOCKER_GID) --group-add $(DOCKER_KVM_GID) \
+      -v $(CURDIR):$(DOCKER_WORKSPACE_PATH) \
+      -v $(SYSROOT_PATH):$(DOCKER_SYSROOT_PATH) \
+      -w $(DOCKER_SYSROOT_PATH) \
+      -e HOME=/tmp \
+      -e USER=$(shell whoami) \
+      $(NANVIX_DOCKER_IMAGE)
     OPENBLAS_CC := $(DOCKER_TOOLCHAIN_PATH)/bin/i686-nanvix-gcc
     OPENBLAS_FC := $(DOCKER_TOOLCHAIN_PATH)/bin/i686-nanvix-gfortran
     OPENBLAS_AR := $(DOCKER_TOOLCHAIN_PATH)/bin/i686-nanvix-ar
     OPENBLAS_RANLIB := $(DOCKER_TOOLCHAIN_PATH)/bin/i686-nanvix-ranlib
     OPENBLAS_PREFIX := $(DOCKER_SYSROOT_PATH)
-    # Paths inside Docker container
     NANVIX_LDFLAGS := -T$(DOCKER_SYSROOT_PATH)/lib/user.ld -static -Wl,-z,noexecstack
-    NANVIX_LIBS := -Wl,--start-group
-    NANVIX_LIBS += $(DOCKER_SYSROOT_PATH)/lib/libposix.a
-    NANVIX_LIBS += $(DOCKER_TOOLCHAIN_PATH)/i686-nanvix/lib/libc.a
-    NANVIX_LIBS += $(DOCKER_TOOLCHAIN_PATH)/i686-nanvix/lib/libm.a
-    NANVIX_LIBS += -Wl,--end-group
+    NANVIX_LIBS := -Wl,--start-group \
+      $(DOCKER_SYSROOT_PATH)/lib/libposix.a \
+      $(DOCKER_TOOLCHAIN_PATH)/i686-nanvix/lib/libc.a \
+      $(DOCKER_TOOLCHAIN_PATH)/i686-nanvix/lib/libm.a \
+      -Wl,--end-group
   else
-    # Native toolchain cross-compilation
     OPENBLAS_CC := $(NANVIX_TOOLCHAIN)/bin/i686-nanvix-gcc
     OPENBLAS_FC := $(NANVIX_TOOLCHAIN)/bin/i686-nanvix-gfortran
     OPENBLAS_AR := $(NANVIX_TOOLCHAIN)/bin/i686-nanvix-ar
     OPENBLAS_RANLIB := $(NANVIX_TOOLCHAIN)/bin/i686-nanvix-ranlib
-    OPENBLAS_PREFIX := $(abspath $(NANVIX_HOME))
-    # Nanvix-specific linker flags and libraries
-    NANVIX_LDFLAGS := -T$(NANVIX_HOME)/lib/user.ld -static -Wl,-z,noexecstack
-    NANVIX_LIBS := -Wl,--start-group
-    NANVIX_LIBS += $(NANVIX_HOME)/lib/libposix.a
-    NANVIX_LIBS += $(NANVIX_TOOLCHAIN)/i686-nanvix/lib/libc.a
-    NANVIX_LIBS += $(NANVIX_TOOLCHAIN)/i686-nanvix/lib/libm.a
-    NANVIX_LIBS += -Wl,--end-group
+    OPENBLAS_PREFIX := $(SYSROOT_PATH)
+    NANVIX_LDFLAGS := -T$(SYSROOT_PATH)/lib/user.ld -static -Wl,-z,noexecstack
+    NANVIX_LIBS := -Wl,--start-group \
+      $(SYSROOT_PATH)/lib/libposix.a \
+      $(NANVIX_TOOLCHAIN)/i686-nanvix/lib/libc.a \
+      $(NANVIX_TOOLCHAIN)/i686-nanvix/lib/libm.a \
+      -Wl,--end-group
   endif
 else
-  # Allow clean target without CONFIG_NANVIX
   ifneq ($(MAKECMDGOALS),clean)
     ifneq ($(MAKECMDGOALS),distclean)
-      $(error CONFIG_NANVIX must be set to 'y'. Usage: make -f Makefile.nanvix CONFIG_NANVIX=y NANVIX_HOME=/path/to/nanvix)
+      $(error CONFIG_NANVIX must be set to 'y'. Usage: make -f Makefile.nanvix CONFIG_NANVIX=y NANVIX_HOME=/path/to/sysroot)
     endif
   endif
-  EXE=.elf
+  EXE = .elf
 endif
+
+# ===========================================================================
+# Build Configuration
+# ===========================================================================
+
+PREFIX ?= $(SYSROOT_PATH)
+PLATFORM ?= unknown
+PROCESS_MODE ?= unknown
 
 # OpenBLAS build options for Nanvix
 # TARGET=P2 is Pentium II (i686 compatible, no SSE required for base operations)
@@ -124,37 +143,25 @@ OPENBLAS_OPTS = \
 	NO_FORTRAN=1 \
 	ONLY_CBLAS=1
 
-# Number of parallel jobs (use nproc if available)
-NPROC := $(shell nproc 2>/dev/null || echo 4)
-
-# Output library
-LIBOPENBLAS = libopenblas.a
-
-# Test program
-CBLAS_TEST = cblas_test$(EXE)
+STATICLIB = libopenblas.a
+CBLAS_TEST_CFLAGS = -O2 -Wall -I. -DSKIP_LEVEL3_TESTS
+TEST_PROGS = cblas_test$(EXE)
 CBLAS_TEST_SRC = test/nanvix_cblas_test.c
 
-# Default target
+# ===========================================================================
+# Build Targets
+# ===========================================================================
+
 all: build
 
-# Build target: invoke upstream Makefile with Nanvix options
 build:
 ifdef CONFIG_NANVIX_DOCKER
-	@echo "Building OpenBLAS for Nanvix using Docker..."
-	$(DOCKER_RUN) make -j$(NPROC) $(OPENBLAS_OPTS) libs
+	$(DOCKER_RUN) make -j$$(nproc) $(OPENBLAS_OPTS) libs
 else
-	@echo "Building OpenBLAS for Nanvix..."
-	make -j$(NPROC) $(OPENBLAS_OPTS) libs
+	make -j$$(nproc) $(OPENBLAS_OPTS) libs
 endif
-	@echo "OpenBLAS build complete."
 
-# Skip Level 3 BLAS tests for P2/P5/P6 targets (missing incopy/itcopy routines)
-# These minimal kernels don't include full GEMM support
-CBLAS_TEST_CFLAGS = -O2 -Wall -I. -DSKIP_LEVEL3_TESTS
-
-# Build test executable
-$(CBLAS_TEST): build $(CBLAS_TEST_SRC)
-	@echo "Building CBLAS test program..."
+cblas_test$(EXE): build $(CBLAS_TEST_SRC)
 ifdef CONFIG_NANVIX_DOCKER
 	$(DOCKER_RUN) $(OPENBLAS_CC) $(CBLAS_TEST_CFLAGS) $(CBLAS_TEST_SRC) -o $@ \
 		-L. -lopenblas $(NANVIX_LDFLAGS) $(NANVIX_LIBS)
@@ -162,35 +169,91 @@ else
 	$(OPENBLAS_CC) $(CBLAS_TEST_CFLAGS) $(CBLAS_TEST_SRC) -o $@ \
 		-L. -lopenblas $(NANVIX_LDFLAGS) $(NANVIX_LIBS)
 endif
-	@echo "CBLAS test program built: $@"
 
-# Verify target: static verification of library
-verify: build
-	@echo "Verifying OpenBLAS library..."
+# ===========================================================================
+# Test Targets
+# ===========================================================================
+
+# --- Smoke tests: verify build artifacts (no runtime needed) ---
+test-smoke: build
+	@echo "=== openblas smoke tests ==="
+	@echo "  Checking libopenblas.a..."
+	@test -f $(STATICLIB) || { echo "  FAIL: $(STATICLIB) not found"; exit 1; }
+	@size=$$(wc -c < $(STATICLIB)); \
+	if [ "$$size" -lt 1000 ]; then echo "  FAIL: $(STATICLIB) too small ($$size bytes)"; exit 1; fi
+	@echo "  Checking headers..."
+	@test -f cblas.h || { echo "  FAIL: cblas.h not found"; exit 1; }
+	@echo "  PASS: openblas smoke tests"
+
+# --- Integration tests: build and link CBLAS test executable ---
+test-integration: $(TEST_PROGS)
+	@echo "=== openblas integration tests ==="
+	@test -f cblas_test$(EXE) || { echo "  FAIL: cblas_test$(EXE) not built"; exit 1; }
+	@echo "  OK: cblas_test$(EXE) ($$(wc -c < cblas_test$(EXE)) bytes)"
+	@echo "  PASS: openblas integration tests"
+
+# --- Functional tests: run CBLAS tests on nanvixd.elf ---
+test-functional: test-integration
+	@echo "=== openblas functional tests ==="
 ifdef CONFIG_NANVIX_DOCKER
-	$(DOCKER_RUN) $(OPENBLAS_AR) -t $(LIBOPENBLAS) | head -20
+	@echo "  Running cblas_test$(EXE) via nanvixd.elf (Docker)..."
+	$(DOCKER_RUN_FUNCTIONAL) sh -c \
+	  'timeout --foreground 120 ./bin/nanvixd.elf -- $(DOCKER_WORKSPACE_PATH)/cblas_test$(EXE)'
+	@echo "  PASS: cblas_test (exit code 0)"
 else
-	$(OPENBLAS_AR) -t $(LIBOPENBLAS) | head -20
+	@echo "  Running cblas_test$(EXE) via nanvixd.elf..."
+	cd "$(SYSROOT_PATH)" && timeout --foreground 120 ./bin/nanvixd.elf -- $(abspath cblas_test$(EXE))
+	@echo "  PASS: cblas_test (exit code 0)"
 endif
-	@test -f $(LIBOPENBLAS) && echo "		*** OpenBLAS library verification OK ***" || (echo "Library not found" && exit 1)
-	@echo "Checking library symbols..."
-ifdef CONFIG_NANVIX_DOCKER
-	$(DOCKER_RUN) sh -c "nm $(LIBOPENBLAS) | grep -E 'cblas_|openblas_' | head -20"
-else
-	nm $(LIBOPENBLAS) | grep -E 'cblas_|openblas_' | head -20
-endif
-	@echo "		*** OpenBLAS symbol verification OK ***"
+	@echo "  PASS: openblas functional tests"
 
-# Test target: run functional tests using nanvixd.elf
-test: $(CBLAS_TEST) verify
-	@echo ""
-	@echo "Running CBLAS functional tests on Nanvix..."
-	@echo "============================================"
-	cd "$(NANVIX_HOME)" && ./bin/nanvixd.elf -- $(abspath $(CBLAS_TEST))
-	@echo ""
-	@echo "		*** OpenBLAS CBLAS tests PASSED ***"
+# --- Run all test levels ---
+test: test-smoke test-integration test-functional
+	@echo "=== All openblas tests PASSED ==="
 
-# Install target
+# ===========================================================================
+# Package Target
+# ===========================================================================
+
+package: all
+	@echo "=== Packaging openblas release ==="
+	$(eval ARTIFACT_NAME := openblas-$(PLATFORM)-$(PROCESS_MODE))
+	rm -rf dist/$(ARTIFACT_NAME)
+	mkdir -p dist/$(ARTIFACT_NAME)/sysroot/lib \
+	         dist/$(ARTIFACT_NAME)/sysroot/include \
+	         dist/$(ARTIFACT_NAME)/sysroot/bin
+	cp -f $(STATICLIB) dist/$(ARTIFACT_NAME)/sysroot/lib/
+	cp -f cblas.h dist/$(ARTIFACT_NAME)/sysroot/include/
+	-cp -f openblas_config.h dist/$(ARTIFACT_NAME)/sysroot/include/ 2>/dev/null || \
+	  cp -f openblas_config_template.h dist/$(ARTIFACT_NAME)/sysroot/include/openblas_config.h
+	-cp -f $(TEST_PROGS) dist/$(ARTIFACT_NAME)/sysroot/bin/ 2>/dev/null || true
+	tar -cjf dist/$(ARTIFACT_NAME).tar.bz2 -C dist/$(ARTIFACT_NAME) sysroot
+	@echo "  Package: dist/$(ARTIFACT_NAME).tar.bz2"
+	@echo "  Contents:"
+	@tar tjf dist/$(ARTIFACT_NAME).tar.bz2 | head -20
+
+# ===========================================================================
+# Verify Package
+# ===========================================================================
+
+verify-package:
+	@echo "=== Verifying openblas package ==="
+	$(eval ARTIFACT_NAME := openblas-$(PLATFORM)-$(PROCESS_MODE))
+	@TARBALL="dist/$(ARTIFACT_NAME).tar.bz2"; \
+	if [ ! -f "$$TARBALL" ]; then \
+	  echo "FAIL: Package tarball not found: $$TARBALL"; exit 1; \
+	fi; \
+	echo "Package contents:"; \
+	tar tjf "$$TARBALL"; \
+	if ! tar tjf "$$TARBALL" | grep -q 'sysroot/lib/'; then \
+	  echo "FAIL: Package missing sysroot/lib/ entries"; exit 1; \
+	fi; \
+	echo "  PASS: openblas package verification"
+
+# ===========================================================================
+# Install / Clean
+# ===========================================================================
+
 install: build
 ifdef CONFIG_NANVIX_DOCKER
 	$(DOCKER_RUN) make $(OPENBLAS_OPTS) install
@@ -198,17 +261,16 @@ else
 	make $(OPENBLAS_OPTS) install
 endif
 
-# Clean target
 clean:
 ifdef CONFIG_NANVIX_DOCKER
 	-$(DOCKER_RUN) make $(OPENBLAS_OPTS) clean 2>/dev/null || true
 else
 	-make $(OPENBLAS_OPTS) clean 2>/dev/null || true
 endif
-	rm -f *.elf test/*.o
+	rm -f $(TEST_PROGS) test/*.o
+	rm -rf dist/
 
-# Distclean target
 distclean: clean
-	git clean -fdx 2>/dev/null || true
+	git clean -fdx -e Makefile.nanvix -e NANVIX.md -e .github -e nanvix-artifacts 2>/dev/null || true
 
-.PHONY: all build verify test install clean distclean
+.PHONY: all build clean distclean install test test-smoke test-integration test-functional package verify-package

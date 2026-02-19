@@ -93,36 +93,39 @@ jobs:
 
       - name: Build
         run: |
-          make -f Makefile.nanvix CONFIG_NANVIX=y NANVIX_HOME="$NANVIX_HOME" NANVIX_TOOLCHAIN="/opt/nanvix" all
+          make -f Makefile.nanvix CONFIG_NANVIX=y \
+            NANVIX_HOME="$NANVIX_HOME" NANVIX_TOOLCHAIN="/opt/nanvix" all
 
-      - name: Build Test Executable
+      - name: Smoke Tests
         run: |
-          make -f Makefile.nanvix CONFIG_NANVIX=y NANVIX_HOME="$NANVIX_HOME" NANVIX_TOOLCHAIN="/opt/nanvix" cblas_test.elf
+          make -f Makefile.nanvix CONFIG_NANVIX=y \
+            NANVIX_HOME="$NANVIX_HOME" NANVIX_TOOLCHAIN="/opt/nanvix" test-smoke
 
-      - name: Static Verification
+      - name: Integration Tests
         run: |
-          make -f Makefile.nanvix CONFIG_NANVIX=y NANVIX_HOME="$NANVIX_HOME" NANVIX_TOOLCHAIN="/opt/nanvix" verify
+          make -f Makefile.nanvix CONFIG_NANVIX=y \
+            NANVIX_HOME="$NANVIX_HOME" NANVIX_TOOLCHAIN="/opt/nanvix" test-integration
 
-      - name: Run Functional Tests
+      - name: Functional Tests
         run: |
-          make -f Makefile.nanvix CONFIG_NANVIX=y NANVIX_HOME="$NANVIX_HOME" NANVIX_TOOLCHAIN="/opt/nanvix" test
+          timeout --foreground 300 make -f Makefile.nanvix CONFIG_NANVIX=y \
+            NANVIX_HOME="$NANVIX_HOME" NANVIX_TOOLCHAIN="/opt/nanvix" test-functional
 
-      - name: Package Artifacts
+      - name: Package
         run: |
-          set -euo pipefail
+          make -f Makefile.nanvix CONFIG_NANVIX=y \
+            NANVIX_HOME="$NANVIX_HOME" NANVIX_TOOLCHAIN="/opt/nanvix" \
+            PLATFORM="${{ matrix.platform }}" PROCESS_MODE="${{ matrix.process-mode }}" \
+            package
           ARTIFACT_NAME="openblas-${{ matrix.platform }}-${{ matrix.process-mode }}"
-          DIST_DIR="dist/${ARTIFACT_NAME}"
-          mkdir -p "${DIST_DIR}/lib" "${DIST_DIR}/include" "${DIST_DIR}/bin"
-          # Copy libraries
-          cp -f libopenblas.a "${DIST_DIR}/lib/" 2>/dev/null || true
-          # Copy headers
-          cp -f cblas.h "${DIST_DIR}/include/" 2>/dev/null || true
-          cp -f openblas_config.h "${DIST_DIR}/include/" 2>/dev/null || true
-          # Copy test executable
-          cp -f cblas_test.elf "${DIST_DIR}/bin/" 2>/dev/null || true
-          # Create tarball
-          tar -cjf "dist/${ARTIFACT_NAME}.tar.bz2" -C dist "${ARTIFACT_NAME}"
           echo "ARTIFACT_TARBALL=dist/${ARTIFACT_NAME}.tar.bz2" >> "$GITHUB_ENV"
+
+      - name: Verify Package
+        run: |
+          make -f Makefile.nanvix CONFIG_NANVIX=y \
+            NANVIX_HOME="$NANVIX_HOME" NANVIX_TOOLCHAIN="/opt/nanvix" \
+            PLATFORM="${{ matrix.platform }}" PROCESS_MODE="${{ matrix.process-mode }}" \
+            verify-package
 
       - name: Upload Build Artifacts
         uses: actions/upload-artifact@v4
@@ -160,14 +163,10 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          echo "Using Nanvix SHA from job outputs: $NANVIX_SHA (full: $NANVIX_SHA_FULL)"
-
-          # Query Nanvix release API for additional metadata
           API_URL="https://api.github.com/repos/nanvix/nanvix/releases/tags/latest"
           RELEASE_INFO=$(curl -fsSL -H "Authorization: Bearer ${GH_TOKEN}" "$API_URL")
           NANVIX_NAME=$(echo "$RELEASE_INFO" | jq -r '.name // "latest"')
           NANVIX_PUBLISHED=$(echo "$RELEASE_INFO" | jq -r '.published_at')
-
           echo "name=${NANVIX_NAME}" >> "$GITHUB_OUTPUT"
           echo "published=${NANVIX_PUBLISHED}" >> "$GITHUB_OUTPUT"
 
@@ -177,16 +176,10 @@ jobs:
           NANVIX_NAME: ${{ steps.nanvix-release.outputs.name }}
           NANVIX_PUBLISHED: ${{ steps.nanvix-release.outputs.published }}
         run: |
-          # Release tag format: {commit-sha}-nanvix-{nanvix-sha}
-          # This enables easy lookup of releases built with a specific Nanvix version
           RELEASE_TAG="${GITHUB_SHA::7}-nanvix-${NANVIX_SHA}"
-
-          # Delete existing release if it exists (idempotent re-runs)
           if gh release view "$RELEASE_TAG" &>/dev/null; then
-            echo "Deleting existing release: $RELEASE_TAG"
             gh release delete "$RELEASE_TAG" --yes --cleanup-tag || true
           fi
-
           gh release create "$RELEASE_TAG" \
             --title "Build ${GITHUB_SHA::7}" \
             --notes "Automated build from branch ${{ github.ref_name }} at commit ${{ github.sha }}.
@@ -201,8 +194,15 @@ jobs:
           - Published: ${NANVIX_PUBLISHED}
           - Commit: [${NANVIX_SHA_FULL}](https://github.com/nanvix/nanvix/commit/${NANVIX_SHA_FULL})
 
-          **Dependencies:**
-          - None (base library)" \
+          **Package Layout:**
+          \`\`\`
+          sysroot/
+            lib/libopenblas.a
+            include/{cblas.h,openblas_config.h}
+            bin/cblas_test.elf
+          \`\`\`
+
+          **Dependencies:** None (standalone library)" \
             --latest \
             release-assets/*.tar.bz2
 
@@ -222,8 +222,7 @@ jobs:
             -f "client_payload[openblas_tag]=${RELEASE_TAG}" || echo "::warning::Failed to trigger numpy workflow"
 
   report-failure:
-    needs:
-      - build
+    needs: [build]
     if: >-
       ${{ always() &&
           (github.event_name == 'repository_dispatch' || github.event_name == 'schedule' || github.event_name == 'push') &&
@@ -238,22 +237,10 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
-            const owner = context.repo.owner;
-            const repo = context.repo.repo;
-            const title = `CI failure (run ${context.runNumber})`;
-            const body = [
-              `The openblas CI workflow failed.`,
-              `- Trigger: ${context.eventName}`,
-              `- Run: [#${context.runNumber}](${runUrl})`,
-              `- SHA: ${context.sha}`,
-              `- build: ${process.env.BUILD_RESULT}`,
-              '',
-              'Please investigate and take any corrective actions.'
-            ].join('\n');
             await github.rest.issues.create({
-              owner,
-              repo,
-              title,
-              body,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `CI failure (run ${context.runNumber})`,
+              body: `The openblas CI workflow failed.\n- Trigger: ${context.eventName}\n- Run: [#${context.runNumber}](${runUrl})\n- SHA: ${context.sha}\n- build: ${process.env.BUILD_RESULT}\n\nPlease investigate.`,
               assignees: ['ppenna']
             });
