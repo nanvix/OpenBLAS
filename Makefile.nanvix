@@ -120,6 +120,7 @@ endif
 PREFIX ?= $(SYSROOT_PATH)
 PLATFORM ?= unknown
 PROCESS_MODE ?= unknown
+MEMORY_SIZE ?= unknown
 
 # OpenBLAS build options for Nanvix
 # TARGET=P2 is Pentium II (i686 compatible, no SSE required for base operations)
@@ -241,7 +242,7 @@ test: test-smoke test-integration test-functional
 
 package: all
 	@echo "=== Packaging openblas release ==="
-	$(eval ARTIFACT_NAME := openblas-$(PLATFORM)-$(PROCESS_MODE))
+	$(eval ARTIFACT_NAME := openblas-$(PLATFORM)-$(PROCESS_MODE)-$(MEMORY_SIZE))
 	rm -rf dist/$(ARTIFACT_NAME)
 	mkdir -p dist/$(ARTIFACT_NAME)/sysroot/lib \
 	         dist/$(ARTIFACT_NAME)/sysroot/include \
@@ -262,7 +263,7 @@ package: all
 
 verify-package:
 	@echo "=== Verifying openblas package ==="
-	$(eval ARTIFACT_NAME := openblas-$(PLATFORM)-$(PROCESS_MODE))
+	$(eval ARTIFACT_NAME := openblas-$(PLATFORM)-$(PROCESS_MODE)-$(MEMORY_SIZE))
 	@TARBALL="dist/$(ARTIFACT_NAME).tar.bz2"; \
 	if [ ! -f "$$TARBALL" ]; then \
 	  echo "FAIL: Package tarball not found: $$TARBALL"; exit 1; \
